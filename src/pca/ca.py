@@ -75,15 +75,33 @@ class CertificateAuthority:
 
         # Set extensions
         cert.add_extensions([
-            crypto.X509Extension(b"bConstraints", True, b"CA:TRUE")
+            crypto.X509Extension(b"basicConstraints", True, b"CA:TRUE")
         ])
 
-        return cls(pkey, cert)
+        # Sign
+        cert.sign(pkey, "sha256")
+
+        # Save
+        buf = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)
+        (path / CERT_FILE).write_bytes(buf)
+
+        return cls(cert)
 
     @classmethod
-    def load(cls, path: Path):
-        pass
+    def load(cls, path: Path) -> "CertificateAuthority":
+        """
+        Load certificate files from disk
+        """
+        buf = (path / CERT_FILE).read_bytes()
+        cert = crypto.load_certificate(crypto.FILETYPE_PEM, buf)
 
-    def __init__(self, key: crypto.PKey, cert: crypto.X509):
-        self.key = key
+        return cls(cert)
+
+    def __init__(self, cert: crypto.X509):
         self.cert = cert
+
+    def __str__(self):
+        subject = self.cert.get_subject()
+        for component in subject.get_components():
+            print(component)
+        return f""

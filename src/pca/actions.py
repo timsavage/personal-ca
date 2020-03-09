@@ -14,7 +14,7 @@ def init_ca(path: Path, pkey_bits: int = 2048) -> int:
         return 1
 
     ca = CertificateAuthority.initialise(
-        path / "ca", "AU", "Savage.Company", email="tim@savage.company", state="New South Wales"
+        path / "ca", "AU", "Savage.Company", email="tim@savage.company", state="New South Wales", key_length=pkey_bits
     )
 
     print(ca)
