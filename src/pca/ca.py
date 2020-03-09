@@ -1,16 +1,13 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from OpenSSL import crypto
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-
-KEY_FILE = "key.pem"
-CERT_FILE = "crt.pem"
-
-
-def _format_timestamp(dt: datetime) -> bytes:
-    value = dt.strftime("%Y%m%d%H%M%SZ")
-    return value.encode("charmap")
+KEY_FILE = "ca.key.pem"
+CERT_FILE = "ca.crt.pem"
 
 
 class CertificateAuthority:
@@ -42,47 +39,46 @@ class CertificateAuthority:
         :param key_length: Length of key file
 
         """
+        valid_from = valid_from or datetime.utcnow()
+        valid_to = valid_to or (valid_from + timedelta(days=365 * 5))
+
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        backend = default_backend()
 
         # Generate private key
-        pkey = crypto.PKey()
-        pkey.generate_key(crypto.TYPE_RSA, key_length)
-        buf = crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey)
+        pkey = rsa.generate_private_key(public_exponent=65537, key_size=key_length, backend=backend)
+        buf = pkey.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
         (path / KEY_FILE).write_bytes(buf)
 
-        # Generate certificate
-        cert = crypto.X509()
-
-        # Configure subject
-        subject = cert.get_subject()
-        subject.countryName = country
-        subject.organizationName = organisation
-        subject.commonName = common_name or f"{organisation} CA"
-        if email:
-            subject.emailAddress = email
-        if state:
-            subject.stateOrProvinceName = state
-
-        # Clone subject to issuer
-        cert.set_issuer(subject)
-
-        # Set valid window
-        valid_from = valid_from or datetime.utcnow()
-        cert.set_notBefore(_format_timestamp(valid_from))
-
-        valid_to = valid_to or (valid_from + timedelta(days=365 * 5))
-        cert.set_notAfter(_format_timestamp(valid_to))
-
-        # Set extensions
-        cert.add_extensions([
-            crypto.X509Extension(b"basicConstraints", True, b"CA:TRUE")
+        # Build your subject/issuer names
+        subject = issuer = x509.Name([
+            x509.NameAttribute(x509.NameOID.COUNTRY_NAME, country),
+            x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, organisation),
+            x509.NameAttribute(x509.NameOID.COMMON_NAME, common_name or f"{organisation} CA"),
         ])
+        ski = x509.SubjectKeyIdentifier.from_public_key(pkey.public_key())
 
-        # Sign
-        cert.sign(pkey, "sha256")
+        # Generate certificate
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(pkey.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(valid_from)
+            .not_valid_after(valid_to)
+            .add_extension(x509.BasicConstraints(True, None), critical=True)
+            .add_extension(ski, critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski), critical=False)
+            .sign(pkey, hashes.SHA256(), backend)
+        )
 
         # Save
-        buf = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)
+        buf = cert.public_bytes(serialization.Encoding.PEM)
         (path / CERT_FILE).write_bytes(buf)
 
         return cls(cert)
@@ -93,15 +89,11 @@ class CertificateAuthority:
         Load certificate files from disk
         """
         buf = (path / CERT_FILE).read_bytes()
-        cert = crypto.load_certificate(crypto.FILETYPE_PEM, buf)
-
+        cert = x509.load_pem_x509_certificate(buf, default_backend())
         return cls(cert)
 
-    def __init__(self, cert: crypto.X509):
+    def __init__(self, cert: x509.Certificate):
         self.cert = cert
 
     def __str__(self):
-        subject = self.cert.get_subject()
-        for component in subject.get_components():
-            print(component)
-        return f""
+        return f"{self.cert}"

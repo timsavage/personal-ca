@@ -3,4 +3,4 @@ Personal Certificate Authority
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 """
-from .__version__ import __version__
+from .version import __version__

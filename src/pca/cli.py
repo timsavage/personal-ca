@@ -17,4 +17,3 @@ def init(opts):
 
 def main():
     APP.dispatch()
-
